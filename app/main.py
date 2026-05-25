@@ -19,8 +19,10 @@ Funcionalidades principais:
 - Materiais de estudo com RAG, BM25, embeddings, FAISS e recuperação híbrida.
 - Agenda acadêmica com eventos, provas, aulas e recorrência semanal simples.
 - Tarefas acadêmicas com criação, listagem, conclusão e remoção.
+- JARVIS com Tool Calling para acionar ferramentas internas de agenda, tarefas e RAG.
 
-O projeto está preparado para futura integração com Tool Calling da LLM.
+O projeto já possui orquestração de Tool Calling via endpoint `/jarvis/ask`, permitindo
+que a LLM escolha dinamicamente ferramentas internas sem regras fixas por palavras-chave.
 """
 
 tags_metadata = [
