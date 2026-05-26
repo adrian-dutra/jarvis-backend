@@ -166,26 +166,22 @@ O tamanho de chunk escolhido mantém conceitos completos dentro de um único vet
 Exemplo:
 
 ```env
-APP_NAME=JARVIS Acadêmico API
-APP_ENV=development
-DEBUG=true
-
-POSTGRES_DB=jarvis_db
-POSTGRES_USER=jarvis
-POSTGRES_PASSWORD=jarvis123
-POSTGRES_HOST=db
-POSTGRES_PORT=5432
-
-DATABASE_URL=postgresql://jarvis:jarvis123@db:5432/jarvis_db
-
-GEMMA_BASE_URL=https://seu-endpoint-gemma/v1
-GEMMA_MODEL=google/gemma-3-12b-it
-GEMMA_API_KEY=sua_chave
-
-UPLOAD_DIR=uploads
-TIMEZONE=America/Campo_Grande
-USE_LOCAL_DATASET=false
-LOCAL_DATASET_PATH=data
+APP_NAME=
+APP_ENV=
+DEBUG=
+POSTGRES_DB=
+POSTGRES_USER=
+POSTGRES_PASSWORD=
+POSTGRES_HOST=
+POSTGRES_PORT=
+DATABASE_URL=
+GEMMA_BASE_URL=
+GEMMA_MODEL=
+GEMMA_API_KEY=
+UPLOAD_DIR=
+TIMEZONE=
+USE_LOCAL_DATASET=
+LOCAL_DATASET_PATH=
 ```
 
 ---
