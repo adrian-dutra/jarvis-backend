@@ -2,7 +2,9 @@ from fastapi import FastAPI
 
 from app.api.routes import agenda
 from app.api.routes import jarvis
+from app.api.routes import learning
 from app.api.routes import materials
+from app.api.routes import study_plan
 from app.api.routes import tasks
 
 description = """
@@ -19,6 +21,8 @@ Funcionalidades principais:
 - Materiais de estudo com RAG, BM25, embeddings, FAISS e recuperação híbrida.
 - Agenda acadêmica com eventos, provas, aulas e recorrência semanal simples.
 - Tarefas acadêmicas com criação, listagem, conclusão e remoção.
+- Planejamento de estudos combinando agenda, tarefas pendentes e materiais via RAG.
+- Aprendizado com exercícios, active recall e recomendações de revisão.
 - JARVIS com Tool Calling para acionar ferramentas internas de agenda, tarefas e RAG.
 
 O projeto já possui orquestração de Tool Calling via endpoint `/jarvis/ask`, permitindo
@@ -37,6 +41,14 @@ tags_metadata = [
     {
         "name": "Tarefas",
         "description": "Gerenciamento de tarefas acadêmicas, estudos, leituras e entregas.",
+    },
+    {
+        "name": "Planejamento de Estudos",
+        "description": "Geração de planos de estudo a partir de agenda, tarefas e materiais RAG.",
+    },
+    {
+        "name": "Aprendizado",
+        "description": "Exercícios, active recall interativo e recomendações de revisão.",
     },
     {
         "name": "Sistema",
@@ -59,6 +71,8 @@ app = FastAPI(
 app.include_router(materials.router)
 app.include_router(agenda.router)
 app.include_router(tasks.router)
+app.include_router(study_plan.router)
+app.include_router(learning.router)
 app.include_router(jarvis.router)
 
 

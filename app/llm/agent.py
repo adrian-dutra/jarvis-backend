@@ -9,10 +9,19 @@ from pydantic import ValidationError
 
 from app.llm.gemma_client import GemmaClient
 from app.schemas.jarvis_schema import JarvisAskResponse, JarvisToolTrace
+from app.schemas.learning_schema import (
+    ActiveRecallAnswerRequest,
+    ActiveRecallStartRequest,
+    ExerciseGenerationRequest,
+)
 from app.schemas.material_schema import MaterialAskRequest
+from app.schemas.study_plan_schema import StudyPlanRequest
 from app.schemas.task_schema import TaskCreate
 from app.services.agenda_service import AgendaService
+from app.services.learning_service import LearningService
 from app.services.material_service import MaterialService
+from app.services.review_service import ReviewService
+from app.services.study_plan_service import StudyPlanService
 from app.services.task_service import TaskService
 
 
@@ -63,6 +72,41 @@ Argumentos:
   "question": "pergunta do usuário"
 }
 
+6. gerar_plano_estudos
+Argumentos:
+{
+  "objective": "objetivo do plano",
+  "target_date": "YYYY-MM-DD ou null",
+  "available_minutes": 120,
+  "material_query": "consulta opcional para buscar materiais"
+}
+
+7. gerar_exercicios
+Argumentos:
+{
+  "topic": "tema dos exercícios",
+  "quantity": 5,
+  "level": "facil/medio/dificil"
+}
+
+8. iniciar_active_recall
+Argumentos:
+{
+  "topic": "tema da pergunta",
+  "level": "facil/medio/dificil"
+}
+
+9. avaliar_resposta_active_recall
+Argumentos:
+{
+  "question_id": 1,
+  "user_answer": "resposta do estudante"
+}
+
+10. recomendar_revisao
+Argumentos:
+{}
+
 Quando precisar usar uma ferramenta, responda SOMENTE com JSON válido neste formato:
 
 {
@@ -85,22 +129,42 @@ class JarvisAgent:
         task_service: TaskService,
         agenda_service: AgendaService,
         material_service: MaterialService,
+        study_plan_service: StudyPlanService | None = None,
+        learning_service: LearningService | None = None,
+        review_service: ReviewService | None = None,
         gemma_client: GemmaClient | None = None,
         max_iterations: int = 3,
     ):
         self.task_service = task_service
         self.agenda_service = agenda_service
         self.material_service = material_service
+        self.study_plan_service = study_plan_service
+        self.learning_service = learning_service
+        self.review_service = review_service
         self.gemma_client = gemma_client or GemmaClient()
         self.max_iterations = max_iterations
 
-    async def ask(self, message: str) -> JarvisAskResponse:
+    async def ask(
+        self,
+        message: str,
+        *,
+        history: list[dict[str, Any]] | None = None,
+        conversation_id: str | None = None,
+    ) -> JarvisAskResponse:
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": message},
         ]
+        messages.extend(self._normalize_history(history or []))
+        messages.append({"role": "user", "content": message})
 
         tools_used: list[JarvisToolTrace] = []
+
+        logger.info(
+            "jarvis ask recebido conversation_id={} history_messages={} message={}",
+            conversation_id,
+            len(history or []),
+            message,
+        )
 
         for _ in range(self.max_iterations):
             response = await self.gemma_client.async_chat(
@@ -115,6 +179,7 @@ class JarvisAgent:
             if not manual_tool_call:
                 return JarvisAskResponse(
                     message=message,
+                    conversation_id=conversation_id,
                     answer=content or "Não consegui gerar uma resposta.",
                     tools_used=tools_used,
                 )
@@ -166,9 +231,23 @@ class JarvisAgent:
 
         return JarvisAskResponse(
             message=message,
+            conversation_id=conversation_id,
             answer="Não consegui finalizar a resposta após executar as ferramentas necessárias.",
             tools_used=tools_used,
         )
+
+    def _normalize_history(
+        self,
+        history: list[dict[str, Any]],
+    ) -> list[dict[str, str]]:
+        normalized: list[dict[str, str]] = []
+        for item in history:
+            role = item.get("role")
+            content = item.get("content")
+            if role not in {"user", "assistant"} or not content:
+                continue
+            normalized.append({"role": role, "content": str(content)})
+        return normalized
 
     def _parse_manual_tool_call(
         self,
@@ -288,6 +367,11 @@ class JarvisAgent:
             "adicionar_tarefa": self._tool_adicionar_tarefa,
             "concluir_tarefa": self._tool_concluir_tarefa,
             "buscar_material_rag": self._tool_buscar_material_rag,
+            "gerar_plano_estudos": self._tool_gerar_plano_estudos,
+            "gerar_exercicios": self._tool_gerar_exercicios,
+            "iniciar_active_recall": self._tool_iniciar_active_recall,
+            "avaliar_resposta_active_recall": self._tool_avaliar_resposta_active_recall,
+            "recomendar_revisao": self._tool_recomendar_revisao,
         }
 
         if name not in tool_map:
@@ -340,6 +424,55 @@ class JarvisAgent:
     ) -> Any:
         payload = MaterialAskRequest(**arguments)
         return await self.material_service.buscar_material_rag(payload)
+
+    async def _tool_gerar_plano_estudos(
+        self,
+        arguments: dict[str, Any],
+    ) -> Any:
+        if self.study_plan_service is None:
+            raise ValueError("StudyPlanService não configurado para o agente")
+
+        payload = StudyPlanRequest(**arguments)
+        return await self.study_plan_service.generate_plan(payload)
+
+    async def _tool_gerar_exercicios(
+        self,
+        arguments: dict[str, Any],
+    ) -> Any:
+        if self.learning_service is None:
+            raise ValueError("LearningService não configurado para o agente")
+
+        payload = ExerciseGenerationRequest(**arguments)
+        return await self.learning_service.generate_exercises(payload)
+
+    async def _tool_iniciar_active_recall(
+        self,
+        arguments: dict[str, Any],
+    ) -> Any:
+        if self.learning_service is None:
+            raise ValueError("LearningService não configurado para o agente")
+
+        payload = ActiveRecallStartRequest(**arguments)
+        return await self.learning_service.start_active_recall(payload)
+
+    async def _tool_avaliar_resposta_active_recall(
+        self,
+        arguments: dict[str, Any],
+    ) -> Any:
+        if self.learning_service is None:
+            raise ValueError("LearningService não configurado para o agente")
+
+        payload = ActiveRecallAnswerRequest(**arguments)
+        return await self.learning_service.evaluate_active_recall(payload)
+
+    async def _tool_recomendar_revisao(
+        self,
+        arguments: dict[str, Any],
+    ) -> Any:
+        if self.review_service is None:
+            raise ValueError("ReviewService não configurado para o agente")
+
+        return await self.review_service.get_review_recommendations()
 
     def _parse_date(self, value: Any) -> date | None:
         if value is None:

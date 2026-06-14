@@ -164,4 +164,126 @@ JARVIS_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "gerar_plano_estudos",
+            "description": (
+                "Gera um plano de estudos combinando agenda acadêmica, tarefas pendentes "
+                "e materiais recuperados por RAG."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "objective": {
+                        "type": "string",
+                        "description": "Objetivo do plano de estudos.",
+                    },
+                    "target_date": {
+                        "type": "string",
+                        "format": "date",
+                        "description": "Data alvo opcional no formato YYYY-MM-DD.",
+                    },
+                    "available_minutes": {
+                        "type": "integer",
+                        "minimum": 15,
+                        "maximum": 720,
+                        "description": "Tempo disponível para estudar, em minutos.",
+                    },
+                    "material_query": {
+                        "type": "string",
+                        "description": "Consulta opcional para recuperar materiais via RAG.",
+                    },
+                },
+                "required": ["objective"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "gerar_exercicios",
+            "description": "Gera exercícios a partir de materiais recuperados por RAG.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "Tema dos exercícios.",
+                    },
+                    "quantity": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "description": "Quantidade de exercícios.",
+                    },
+                    "level": {
+                        "type": "string",
+                        "enum": ["facil", "medio", "dificil"],
+                        "description": "Nível de dificuldade.",
+                    },
+                },
+                "required": ["topic"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "iniciar_active_recall",
+            "description": "Gera uma pergunta interativa de active recall baseada em materiais RAG.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "Tema da pergunta.",
+                    },
+                    "level": {
+                        "type": "string",
+                        "enum": ["facil", "medio", "dificil"],
+                        "description": "Nível de dificuldade.",
+                    },
+                },
+                "required": ["topic"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "avaliar_resposta_active_recall",
+            "description": "Avalia a resposta do estudante para uma pergunta de active recall.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question_id": {
+                        "type": "integer",
+                        "description": "Identificador retornado pela ferramenta iniciar_active_recall.",
+                    },
+                    "user_answer": {
+                        "type": "string",
+                        "description": "Resposta do estudante.",
+                    },
+                },
+                "required": ["question_id", "user_answer"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "recomendar_revisao",
+            "description": "Recomenda temas para revisão com base em tentativas ruins de active recall.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
 ]

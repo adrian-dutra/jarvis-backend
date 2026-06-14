@@ -27,6 +27,17 @@ O objetivo do projeto é demonstrar a aplicação prática de técnicas modernas
   - Conclusão de tarefas
   - Remoção de tarefas
 
+- Planejamento de estudos
+  - Combina agenda acadêmica, tarefas pendentes e materiais recuperados por RAG
+  - Gera prioridades justificadas
+  - Organiza o estudo em blocos com tempo sugerido
+  - Indica a próxima ação recomendada
+
+- Aprendizado
+  - Geração de exercícios a partir dos materiais
+  - Active recall interativo com pergunta e avaliação da resposta
+  - Recomendação de revisão baseada em dificuldades identificadas
+
 - Tool Calling
   - A LLM decide dinamicamente quais ferramentas utilizar
   - Integração com agenda, tarefas e RAG
@@ -153,6 +164,239 @@ O sistema utiliza Janela Deslizante (Sliding Window):
 O overlap reduz perda de contexto entre chunks consecutivos e melhora o recall da busca híbrida.
 
 O tamanho de chunk escolhido mantém conceitos completos dentro de um único vetor sem gerar excesso de contexto irrelevante.
+
+---
+
+# Funcionalidade 3.4: Planejamento de Estudos
+
+O planejamento de estudos usa a rota `POST /study-plan` para gerar um plano objetivo a partir de três fontes do sistema:
+
+1. Agenda acadêmica: eventos entre a data atual e a data alvo informada.
+2. Tarefas pendentes: atividades ainda não concluídas.
+3. Materiais RAG: trechos recuperados por busca híbrida usando `material_query` ou o próprio objetivo.
+
+Quando alguma fonte não possui dados, o endpoint continua retornando `200 OK` e inclui avisos no campo `warnings`.
+
+## Endpoint
+
+```http
+POST /study-plan
+```
+
+Request:
+
+```json
+{
+  "objective": "Montar um plano de estudos para a prova de IA",
+  "target_date": "2026-06-20",
+  "available_minutes": 120,
+  "material_query": "RAG, embeddings, FAISS, BM25"
+}
+```
+
+Response resumida:
+
+```json
+{
+  "objective": "Montar um plano de estudos para a prova de IA",
+  "priorities": [
+    {
+      "title": "Revisar RAG híbrido",
+      "level": "high",
+      "justification": "Tema recorrente nos materiais recuperados e relacionado à prova.",
+      "related_sources": ["material:ia.pdf#chunk-1"]
+    }
+  ],
+  "agenda_considered": [
+    {
+      "source_type": "agenda",
+      "reference": "agenda:1",
+      "title": "Prova de IA",
+      "summary": "exam disciplina=IA em 2026-06-20 08:00:00."
+    }
+  ],
+  "tasks_considered": [],
+  "materials_considered": [
+    {
+      "source_type": "material",
+      "reference": "material:ia.pdf#chunk-1",
+      "title": "ia.pdf",
+      "summary": "Trecho recuperado sobre RAG, embeddings e FAISS."
+    }
+  ],
+  "study_blocks": [
+    {
+      "order": 1,
+      "duration_minutes": 60,
+      "focus": "RAG e embeddings",
+      "activity": "Revisar conceitos e produzir um resumo curto.",
+      "related_sources": ["material:ia.pdf#chunk-1"],
+      "justification": "Ataca o tema mais relevante para o objetivo."
+    }
+  ],
+  "next_action": "Comece pelo primeiro bloco e anote dúvidas.",
+  "warnings": ["Nenhuma tarefa pendente encontrada."],
+  "llm_summary": "Plano gerado com base na agenda e nos materiais recuperados."
+}
+```
+
+O agente JARVIS também possui a ferramenta `gerar_plano_estudos`. A decisão de usá-la continua sendo feita pela LLM no endpoint `/jarvis/ask`, sem regras fixas por palavra-chave.
+
+---
+
+# Melhorias de Aprendizado
+
+O módulo de aprendizado implementa as funcionalidades acadêmicas obrigatórias voltadas ao estudo ativo. A funcionalidade interativa é o active recall: o sistema pergunta algo ao estudante, recebe a resposta e avalia como `correta`, `parcialmente_correta` ou `incorreta`.
+
+As dificuldades são identificadas a partir das tentativas salvas em `learning_attempts`. Respostas incorretas ou parcialmente corretas são agrupadas por tema e usadas para recomendar revisão.
+
+## Gerar exercícios
+
+```http
+POST /learning/exercises
+```
+
+Request:
+
+```json
+{
+  "topic": "RAG e embeddings",
+  "quantity": 5,
+  "level": "medio"
+}
+```
+
+Response resumida:
+
+```json
+{
+  "topic": "RAG e embeddings",
+  "level": "medio",
+  "exercises": [
+    {
+      "question": "Explique como embeddings ajudam na recuperação semântica.",
+      "exercise_type": "discursiva",
+      "expected_answer": "Embeddings representam textos como vetores para comparar similaridade semântica."
+    }
+  ],
+  "sources": [
+    {
+      "material_id": 1,
+      "material_name": "rag.pdf",
+      "chunk_id": 10,
+      "chunk_index": 2,
+      "score": 0.91,
+      "text": "Trecho recuperado sobre RAG e embeddings."
+    }
+  ]
+}
+```
+
+## Active recall
+
+Iniciar pergunta:
+
+```http
+POST /learning/active-recall/start
+```
+
+```json
+{
+  "topic": "RAG e embeddings",
+  "level": "medio"
+}
+```
+
+Resposta:
+
+```json
+{
+  "question_id": 1,
+  "topic": "RAG e embeddings",
+  "level": "medio",
+  "question": "Como o RAG usa informações externas para melhorar uma resposta?",
+  "sources": []
+}
+```
+
+Avaliar resposta:
+
+```http
+POST /learning/active-recall/answer
+```
+
+```json
+{
+  "question_id": 1,
+  "user_answer": "O RAG recupera documentos externos e usa esse contexto antes de gerar a resposta."
+}
+```
+
+Response resumida:
+
+```json
+{
+  "question_id": 1,
+  "classification": "correta",
+  "score": 0.95,
+  "feedback": "Boa resposta, você explicou a recuperação e o uso do contexto.",
+  "expected_answer_summary": "RAG recupera informações externas relevantes e usa esse contexto na geração.",
+  "strengths": ["Mencionou recuperação externa", "Relacionou contexto e geração"],
+  "improvements": ["Citar exemplos de fontes externas"],
+  "review_recommendation": "Revise exemplos práticos de pipelines RAG."
+}
+```
+
+## Recomendações de revisão
+
+```http
+GET /learning/review-recommendations
+```
+
+Response resumida:
+
+```json
+{
+  "recommendations": [
+    {
+      "topic": "RAG e embeddings",
+      "priority": "alta",
+      "reason": "O tema teve 2 tentativa(s) com dificuldade, média 0.35, 2 incorreta(s) e 0 parcialmente correta(s).",
+      "attempts_count": 2,
+      "average_score": 0.35
+    }
+  ],
+  "generated_at": "2026-06-14T12:00:00"
+}
+```
+
+O agente JARVIS também pode chamar as ferramentas `gerar_exercicios`, `iniciar_active_recall`, `avaliar_resposta_active_recall` e `recomendar_revisao` por Tool Calling.
+
+---
+
+# Conversas no JARVIS
+
+O endpoint `POST /jarvis/ask` mantém um histórico simples em memória usando `conversation_id`. Isso permite testar conversas em sequência no Swagger ou Postman sem precisar reenviar todo o histórico manualmente.
+
+Exemplo:
+
+```json
+{
+  "conversation_id": "teste-rag",
+  "message": "Crie uma pergunta sobre RAG."
+}
+```
+
+Na próxima chamada, use o mesmo `conversation_id`:
+
+```json
+{
+  "conversation_id": "teste-rag",
+  "message": "A resposta é recuperação de documentos."
+}
+```
+
+A API registra nos logs a pergunta atual, as mensagens anteriores carregadas e a resposta final do assistente. O histórico é mantido apenas em memória, então é perdido ao reiniciar a aplicação.
 
 ---
 
