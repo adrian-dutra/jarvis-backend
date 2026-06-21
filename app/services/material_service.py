@@ -133,15 +133,31 @@ class MaterialService:
         self,
         request: MaterialAskRequest,
     ) -> MaterialAskResponse:
+        trace_id = uuid4().hex[:12]
+        origin = "local_dataset" if self.settings.use_local_dataset else "database"
+        evaluation_logger = logger.bind(log_type="rag_evaluation")
         documents = await self._load_documents_for_question(request.material_id)
 
         logger.info(
             "pergunta RAG recebida origem={} method={} material_id={} k={} alpha={}",
-            "local_dataset" if self.settings.use_local_dataset else "database",
+            origin,
             request.method,
             request.material_id,
             request.k,
             request.alpha,
+        )
+        evaluation_logger.info(
+            'RAG_EVALUATION_START trace_id={} origin={} method={} material_id={} '
+            'k={} alpha={} min_score={} documents={} question="{}"',
+            trace_id,
+            origin,
+            request.method,
+            request.material_id,
+            request.k,
+            request.alpha,
+            request.min_score,
+            len(documents),
+            self._log_text(request.question),
         )
 
         try:
@@ -172,8 +188,19 @@ class MaterialService:
             len(retrieved),
             len(useful_retrieved),
         )
+        evaluation_logger.info(
+            "RAG_EVALUATION_RETRIEVAL trace_id={} retrieved={} useful={}",
+            trace_id,
+            len(retrieved),
+            len(useful_retrieved),
+        )
 
         if not useful_retrieved:
+            evaluation_logger.info(
+                'RAG_EVALUATION_END trace_id={} sources=0 answer="{}" not_found=true',
+                trace_id,
+                NOT_FOUND_ANSWER,
+            )
             return MaterialAskResponse(
                 question=request.question,
                 answer=NOT_FOUND_ANSWER,
@@ -206,6 +233,28 @@ class MaterialService:
             )
             for item in useful_retrieved
         ]
+        for rank, source in enumerate(sources, start=1):
+            evaluation_logger.info(
+                'RAG_EVALUATION_SOURCE trace_id={} rank={} material_id={} '
+                'material_name="{}" chunk_id={} chunk_index={} score={:.4f} text="{}"',
+                trace_id,
+                rank,
+                source.material_id,
+                self._log_text(source.material_name, limit=160),
+                source.chunk_id,
+                source.chunk_index,
+                source.score,
+                self._log_text(source.text),
+            )
+
+        not_found = answer == NOT_FOUND_ANSWER
+        evaluation_logger.info(
+            'RAG_EVALUATION_END trace_id={} sources={} answer="{}" not_found={}',
+            trace_id,
+            0 if not_found else len(sources),
+            self._log_text(answer, limit=800),
+            str(not_found).lower(),
+        )
 
         return MaterialAskResponse(
             question=request.question,
@@ -280,6 +329,12 @@ class MaterialService:
         text = extract_text(file_path)
         chunks = split_text(text, chunk_size=800, overlap=150)
         return text, chunks
+
+    def _log_text(self, value: str, limit: int = 500) -> str:
+        normalized = " ".join(value.split()).replace('"', "'")
+        if len(normalized) <= limit:
+            return normalized
+        return f"{normalized[: limit - 3]}..."
 
     def _utc_now(self) -> datetime:
         return datetime.now(timezone.utc).replace(tzinfo=None)

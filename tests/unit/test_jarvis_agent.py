@@ -76,6 +76,143 @@ async def test_agent_executa_listar_tarefas_quando_modelo_solicita_tool(mocker):
     assert response.tools_used[0].result == {"ok": True, "data": []}
 
 
+async def test_agent_executa_multiplas_tools_embutidas_em_texto_sem_expor_json():
+    agenda_service = SimpleNamespace(consultar_agenda=AsyncMock(return_value=[]))
+    task_service = SimpleNamespace(listar_tarefas=AsyncMock(return_value=[]))
+    gemma_client = SimpleNamespace(
+        async_chat=AsyncMock(
+            side_effect=[
+                _response(
+                    content=(
+                        "Vou consultar sua agenda e lista de tarefas. "
+                        '{"tool": "consultar_agenda", "arguments": {'
+                        '"start_date": "2026-06-21", "end_date": "2026-06-21"}} '
+                        '{"tool": "listar_tarefas", "arguments": {'
+                        '"status": "pending", "priority": "high", "subject": null}}'
+                    )
+                ),
+                _response(content="Hoje, priorize as tarefas de alta prioridade."),
+            ]
+        )
+    )
+    agent = _agent(
+        gemma_client=gemma_client,
+        agenda_service=agenda_service,
+        task_service=task_service,
+    )
+
+    response = await agent.ask("O que devo priorizar hoje?")
+
+    agenda_service.consultar_agenda.assert_awaited_once()
+    task_service.listar_tarefas.assert_awaited_once_with(
+        status_filter="pending",
+        priority="high",
+        subject=None,
+    )
+    assert response.answer == "Hoje, priorize as tarefas de alta prioridade."
+    assert '"tool"' not in response.answer
+    assert [tool.name for tool in response.tools_used] == [
+        "consultar_agenda",
+        "listar_tarefas",
+    ]
+
+
+async def test_agent_normaliza_argumentos_em_portugues_das_tools():
+    agenda_service = SimpleNamespace(consultar_agenda=AsyncMock(return_value=[]))
+    task_service = SimpleNamespace(listar_tarefas=AsyncMock(return_value=[]))
+    gemma_client = SimpleNamespace(
+        async_chat=AsyncMock(
+            side_effect=[
+                _response(
+                    content=(
+                        '{"tool": "consultar_agenda", "arguments": {"event_type": "prova"}}'
+                        '{"tool": "listar_tarefas", "arguments": {'
+                        '"status": "pendente", "priority": "alta"}}'
+                    )
+                ),
+                _response(content="Não encontrei compromissos prioritários."),
+            ]
+        )
+    )
+    agent = _agent(
+        gemma_client=gemma_client,
+        agenda_service=agenda_service,
+        task_service=task_service,
+    )
+
+    await agent.ask("Qual prova devo priorizar?")
+
+    agenda_service.consultar_agenda.assert_awaited_once_with(
+        start_date=None,
+        end_date=None,
+        event_type="exam",
+        subject=None,
+    )
+    task_service.listar_tarefas.assert_awaited_once_with(
+        status_filter="pending",
+        priority="high",
+        subject=None,
+    )
+
+
+async def test_agent_normaliza_prioridade_ao_adicionar_tarefa():
+    task_service = SimpleNamespace(adicionar_tarefa=AsyncMock(return_value={"id": 1}))
+    gemma_client = SimpleNamespace(
+        async_chat=AsyncMock(
+            side_effect=[
+                _response(
+                    content=(
+                        '{"tool": "adicionar_tarefa", "arguments": {'
+                        '"title": "Estudar Kotlin", "subject": "Kotlin", '
+                        '"priority": "alta", "due_date": "2026-06-24"}}'
+                    )
+                ),
+                _response(content="Tarefa criada."),
+            ]
+        )
+    )
+    agent = _agent(gemma_client=gemma_client, task_service=task_service)
+
+    response = await agent.ask("Crie uma tarefa para estudar Kotlin")
+
+    payload = task_service.adicionar_tarefa.await_args.args[0]
+    assert payload.priority == "high"
+    assert response.answer == "Tarefa criada."
+    assert response.tools_used[0].result["ok"] is True
+
+
+async def test_agent_cria_evento_na_agenda_quando_modelo_solicita_tool():
+    agenda_service = SimpleNamespace(create_event=AsyncMock(return_value={"id": 10}))
+    gemma_client = SimpleNamespace(
+        async_chat=AsyncMock(
+            side_effect=[
+                _response(
+                    content=(
+                        '{"tool": "adicionar_evento_agenda", "arguments": {'
+                        '"title": "Estudar Kotlin", '
+                        '"description": "Preparação para a prova", '
+                        '"event_type": "atividade", '
+                        '"subject": "Kotlin", '
+                        '"start_at": "2026-06-22T19:00:00", '
+                        '"end_at": "2026-06-22T20:00:00"}}'
+                    )
+                ),
+                _response(content="Evento criado na agenda."),
+            ]
+        )
+    )
+    agent = _agent(gemma_client=gemma_client, agenda_service=agenda_service)
+
+    response = await agent.ask("Crie na agenda um evento para estudar Kotlin")
+
+    payload = agenda_service.create_event.await_args.args[0]
+    assert payload.title == "Estudar Kotlin"
+    assert payload.event_type == "activity"
+    assert payload.subject == "Kotlin"
+    assert response.answer == "Evento criado na agenda."
+    assert response.tools_used[0].name == "adicionar_evento_agenda"
+
+
 async def test_agent_retorna_texto_quando_resposta_nao_for_json_de_tool(mocker):
     gemma_client = SimpleNamespace(
         async_chat=AsyncMock(return_value=_response(content="{status: pending}"))

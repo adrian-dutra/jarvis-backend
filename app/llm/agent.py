@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from app.llm.gemma_client import GemmaClient
 from app.schemas.jarvis_schema import JarvisAskResponse, JarvisToolTrace
+from app.schemas.agenda_schema import AgendaEventCreate
 from app.schemas.learning_schema import (
     ActiveRecallAnswerRequest,
     ActiveRecallStartRequest,
@@ -45,8 +46,8 @@ Argumentos:
 2. listar_tarefas
 Argumentos:
 {
-  "status": "pendente/concluida/todas ou null",
-  "priority": "baixa/media/alta ou null",
+  "status": "pending/completed ou null",
+  "priority": "low/medium/high ou null",
   "subject": "matéria ou null"
 }
 
@@ -56,23 +57,43 @@ Argumentos:
   "title": "título da tarefa",
   "description": "descrição",
   "subject": "matéria",
-  "priority": "baixa/media/alta",
+  "priority": "low/medium/high",
   "due_date": "YYYY-MM-DD ou null"
 }
 
-4. concluir_tarefa
+4. adicionar_evento_agenda
+Argumentos:
+{
+  "title": "título do evento",
+  "description": "descrição",
+  "event_type": "class/exam/meeting/assignment/activity/other",
+  "subject": "matéria",
+  "location": "local ou null",
+  "start_at": "YYYY-MM-DDTHH:MM:SS",
+  "end_at": "YYYY-MM-DDTHH:MM:SS ou null",
+  "all_day": false,
+  "recurrence_type": "none/weekly",
+  "recurrence_weekdays": [0, 1, 2] ou null,
+  "recurrence_until": "YYYY-MM-DD ou null"
+}
+
+Use adicionar_evento_agenda quando o usuário pedir para criar/cadastrar/marcar
+um evento, estudo, aula, prova, reunião ou compromisso na agenda.
+Use adicionar_tarefa apenas quando o usuário pedir uma tarefa pendente.
+
+5. concluir_tarefa
 Argumentos:
 {
   "task_id": 1
 }
 
-5. buscar_material_rag
+6. buscar_material_rag
 Argumentos:
 {
   "question": "pergunta do usuário"
 }
 
-6. gerar_plano_estudos
+7. gerar_plano_estudos
 Argumentos:
 {
   "objective": "objetivo do plano",
@@ -81,7 +102,7 @@ Argumentos:
   "material_query": "consulta opcional para buscar materiais"
 }
 
-7. gerar_exercicios
+8. gerar_exercicios
 Argumentos:
 {
   "topic": "tema dos exercícios",
@@ -89,21 +110,21 @@ Argumentos:
   "level": "facil/medio/dificil"
 }
 
-8. iniciar_active_recall
+9. iniciar_active_recall
 Argumentos:
 {
   "topic": "tema da pergunta",
   "level": "facil/medio/dificil"
 }
 
-9. avaliar_resposta_active_recall
+10. avaliar_resposta_active_recall
 Argumentos:
 {
   "question_id": 1,
   "user_answer": "resposta do estudante"
 }
 
-10. recomendar_revisao
+11. recomendar_revisao
 Argumentos:
 {}
 
@@ -174,9 +195,9 @@ class JarvisAgent:
             assistant_message = response.choices[0].message
             content = self._get_message_content(assistant_message) or ""
 
-            manual_tool_call = self._parse_manual_tool_call(content)
+            manual_tool_calls = self._parse_manual_tool_calls(content)
 
-            if not manual_tool_call:
+            if not manual_tool_calls:
                 return JarvisAskResponse(
                     message=message,
                     conversation_id=conversation_id,
@@ -184,35 +205,44 @@ class JarvisAgent:
                     tools_used=tools_used,
                 )
 
-            name = manual_tool_call["tool"]
-            arguments = manual_tool_call["arguments"]
+            tool_results: list[dict[str, Any]] = []
+            for manual_tool_call in manual_tool_calls:
+                name = manual_tool_call["tool"]
+                arguments = manual_tool_call["arguments"]
 
-            arguments, result = await self._parse_and_execute_tool(
-                name=name,
-                raw_arguments=json.dumps(arguments),
-            )
-
-            serialized_result = jsonable_encoder(result)
-
-            tools_used.append(
-                JarvisToolTrace(
+                arguments, result = await self._parse_and_execute_tool(
                     name=name,
-                    arguments=arguments,
-                    result=serialized_result,
+                    raw_arguments=json.dumps(arguments),
                 )
-            )
 
-            logger.info(
-                "tool calling manual name={} entrada={} saida={}",
-                name,
-                arguments,
-                serialized_result,
-            )
+                serialized_result = jsonable_encoder(result)
+
+                tools_used.append(
+                    JarvisToolTrace(
+                        name=name,
+                        arguments=arguments,
+                        result=serialized_result,
+                    )
+                )
+                tool_results.append(
+                    {
+                        "tool": name,
+                        "arguments": arguments,
+                        "result": serialized_result,
+                    }
+                )
+
+                logger.info(
+                    "tool calling manual name={} entrada={} saida={}",
+                    name,
+                    arguments,
+                    serialized_result,
+                )
 
             messages.append(
                 {
                     "role": "assistant",
-                    "content": content,
+                    "content": "Vou consultar as ferramentas internas necessárias.",
                 }
             )
 
@@ -220,9 +250,10 @@ class JarvisAgent:
                 {
                     "role": "user",
                     "content": (
-                        "Resultado da ferramenta:\n"
-                        f"{json.dumps(serialized_result, ensure_ascii=False)}\n\n"
-                        "Agora responda ao usuário de forma natural e objetiva."
+                        "Resultados das ferramentas:\n"
+                        f"{json.dumps(tool_results, ensure_ascii=False)}\n\n"
+                        "Agora responda ao usuário de forma natural e objetiva. "
+                        "Não inclua JSON de ferramentas na resposta final."
                     ),
                 }
             )
@@ -246,6 +277,8 @@ class JarvisAgent:
             content = item.get("content")
             if role not in {"user", "assistant"} or not content:
                 continue
+            if role == "assistant" and self._parse_manual_tool_calls(str(content)):
+                continue
             normalized.append({"role": role, "content": str(content)})
         return normalized
 
@@ -253,11 +286,53 @@ class JarvisAgent:
         self,
         content: str,
     ) -> dict[str, Any] | None:
-        try:
-            data = json.loads(content)
-        except json.JSONDecodeError:
-            return None
+        calls = self._parse_manual_tool_calls(content)
+        return calls[0] if calls else None
 
+    def _parse_manual_tool_calls(
+        self,
+        content: str,
+    ) -> list[dict[str, Any]]:
+        candidates = self._extract_json_candidates(content)
+        tool_calls: list[dict[str, Any]] = []
+        for data in candidates:
+            if isinstance(data, list):
+                items = data
+            else:
+                items = [data]
+
+            for item in items:
+                tool_call = self._tool_call_from_data(item)
+                if tool_call:
+                    tool_calls.append(tool_call)
+
+        return tool_calls
+
+    def _extract_json_candidates(self, content: str) -> list[Any]:
+        decoder = json.JSONDecoder()
+        candidates: list[Any] = []
+        index = 0
+
+        while index < len(content):
+            next_object = content.find("{", index)
+            next_array = content.find("[", index)
+            starts = [position for position in (next_object, next_array) if position >= 0]
+            if not starts:
+                break
+
+            start = min(starts)
+            try:
+                data, end = decoder.raw_decode(content[start:])
+            except json.JSONDecodeError:
+                index = start + 1
+                continue
+
+            candidates.append(data)
+            index = start + end
+
+        return candidates
+
+    def _tool_call_from_data(self, data: Any) -> dict[str, Any] | None:
         if not isinstance(data, dict):
             return None
 
@@ -365,6 +440,7 @@ class JarvisAgent:
             "consultar_agenda": self._tool_consultar_agenda,
             "listar_tarefas": self._tool_listar_tarefas,
             "adicionar_tarefa": self._tool_adicionar_tarefa,
+            "adicionar_evento_agenda": self._tool_adicionar_evento_agenda,
             "concluir_tarefa": self._tool_concluir_tarefa,
             "buscar_material_rag": self._tool_buscar_material_rag,
             "gerar_plano_estudos": self._tool_gerar_plano_estudos,
@@ -386,7 +462,7 @@ class JarvisAgent:
         return await self.agenda_service.consultar_agenda(
             start_date=self._parse_date(arguments.get("start_date")),
             end_date=self._parse_date(arguments.get("end_date")),
-            event_type=arguments.get("event_type"),
+            event_type=self._normalize_agenda_event_type(arguments.get("event_type")),
             subject=arguments.get("subject"),
         )
 
@@ -395,8 +471,8 @@ class JarvisAgent:
         arguments: dict[str, Any],
     ) -> Any:
         return await self.task_service.listar_tarefas(
-            status_filter=arguments.get("status"),
-            priority=arguments.get("priority"),
+            status_filter=self._normalize_task_status(arguments.get("status")),
+            priority=self._normalize_task_priority(arguments.get("priority")),
             subject=arguments.get("subject"),
         )
 
@@ -404,8 +480,17 @@ class JarvisAgent:
         self,
         arguments: dict[str, Any],
     ) -> Any:
-        payload = TaskCreate(**arguments)
+        payload = TaskCreate(**self._normalize_task_create_arguments(arguments))
         return await self.task_service.adicionar_tarefa(payload)
+
+    async def _tool_adicionar_evento_agenda(
+        self,
+        arguments: dict[str, Any],
+    ) -> Any:
+        payload = AgendaEventCreate(
+            **self._normalize_agenda_event_create_arguments(arguments)
+        )
+        return await self.agenda_service.create_event(payload)
 
     async def _tool_concluir_tarefa(
         self,
@@ -482,6 +567,108 @@ class JarvisAgent:
             return value
 
         return date.fromisoformat(str(value))
+
+    def _normalize_agenda_event_type(self, value: Any) -> str | None:
+        mapping = {
+            "aula": "class",
+            "class": "class",
+            "classe": "class",
+            "prova": "exam",
+            "exam": "exam",
+            "exame": "exam",
+            "reuniao": "meeting",
+            "reunião": "meeting",
+            "meeting": "meeting",
+            "trabalho": "assignment",
+            "assignment": "assignment",
+            "atividade": "activity",
+            "activity": "activity",
+            "outro": "other",
+            "other": "other",
+        }
+        return self._normalize_mapped_value(value, mapping)
+
+    def _normalize_task_status(self, value: Any) -> str | None:
+        mapping = {
+            "pendente": "pending",
+            "pending": "pending",
+            "concluida": "completed",
+            "concluída": "completed",
+            "completed": "completed",
+            "todas": None,
+            "todos": None,
+            "all": None,
+        }
+        return self._normalize_mapped_value(value, mapping)
+
+    def _normalize_task_priority(self, value: Any) -> str | None:
+        mapping = {
+            "baixa": "low",
+            "low": "low",
+            "media": "medium",
+            "média": "medium",
+            "medium": "medium",
+            "alta": "high",
+            "high": "high",
+        }
+        return self._normalize_mapped_value(value, mapping)
+
+    def _normalize_task_create_arguments(
+        self,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized = dict(arguments)
+        if "priority" in normalized:
+            normalized["priority"] = self._normalize_task_priority(
+                normalized.get("priority")
+            )
+        return normalized
+
+    def _normalize_agenda_event_create_arguments(
+        self,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized = dict(arguments)
+        normalized["event_type"] = (
+            self._normalize_agenda_event_type(normalized.get("event_type"))
+            or "activity"
+        )
+
+        recurrence_type = normalized.get("recurrence_type")
+        if recurrence_type is not None:
+            normalized["recurrence_type"] = self._normalize_recurrence_type(
+                recurrence_type
+            )
+
+        if normalized.get("all_day") is None:
+            normalized["all_day"] = False
+
+        return normalized
+
+    def _normalize_recurrence_type(self, value: Any) -> str:
+        mapping = {
+            "nenhuma": "none",
+            "nao": "none",
+            "não": "none",
+            "none": "none",
+            "semanal": "weekly",
+            "weekly": "weekly",
+        }
+        return self._normalize_mapped_value(value, mapping) or "none"
+
+    def _normalize_mapped_value(
+        self,
+        value: Any,
+        mapping: dict[str, str | None],
+    ) -> str | None:
+        if value is None:
+            return None
+
+        normalized = str(value).strip().lower()
+        if not normalized or normalized == "null":
+            return None
+
+        return mapping.get(normalized, normalized)
 
     def _get_message_content(
         self,

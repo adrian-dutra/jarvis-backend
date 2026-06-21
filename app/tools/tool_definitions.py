@@ -122,6 +122,77 @@ JARVIS_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "adicionar_evento_agenda",
+            "description": "Cria um evento ou compromisso na agenda acadêmica.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Título do evento.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Descrição opcional do evento.",
+                    },
+                    "event_type": {
+                        "type": "string",
+                        "enum": [
+                            "class",
+                            "exam",
+                            "meeting",
+                            "assignment",
+                            "activity",
+                            "other",
+                        ],
+                        "description": "Tipo do evento.",
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "Disciplina ou assunto relacionado.",
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "Local físico ou virtual do evento.",
+                    },
+                    "start_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "Início do evento em formato ISO 8601.",
+                    },
+                    "end_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "Fim opcional do evento em formato ISO 8601.",
+                    },
+                    "all_day": {
+                        "type": "boolean",
+                        "description": "Indica se o evento ocupa o dia inteiro.",
+                    },
+                    "recurrence_type": {
+                        "type": "string",
+                        "enum": ["none", "weekly"],
+                        "description": "Tipo de recorrência.",
+                    },
+                    "recurrence_weekdays": {
+                        "type": "array",
+                        "items": {"type": "integer", "minimum": 0, "maximum": 6},
+                        "description": "Dias da semana para recorrência semanal.",
+                    },
+                    "recurrence_until": {
+                        "type": "string",
+                        "format": "date",
+                        "description": "Data final opcional da recorrência.",
+                    },
+                },
+                "required": ["title", "event_type", "start_at"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "buscar_material_rag",
             "description": "Busca respostas em materiais indexados usando recuperação RAG híbrida.",
             "parameters": {
